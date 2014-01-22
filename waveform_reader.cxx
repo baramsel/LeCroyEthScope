@@ -2,6 +2,8 @@
 #include <fstream>
 #include <string>
 
+#include <boost/lexical_cast.hpp>
+
 #define HEX(x) std::hex << "0x" << static_cast<int>(x) << std::dec
 
 unsigned checkHeader(char *header) {
@@ -14,7 +16,7 @@ unsigned checkHeader(char *header) {
     std::cout << "- Operation:       " << HEX(0xFF & header[0]) << std::endl;
     std::cout << "- Header Version:  " << HEX(0xFF & header[1]) << std::endl;
     std::cout << "- Sequence number: " << HEX(0xFF & header[2]) << std::endl;
-    std::cout << "- Block Length:    " << HEX(length) << std::endl;
+    std::cout << "- Block Length:    " << length << std::endl;
     return length;
 }
 int main(int argc, char *argv[]) {
@@ -34,16 +36,26 @@ int main(int argc, char *argv[]) {
         return 0;
     }
     
-    // Check header information
+    // Read & Check header information
     char header[8];
     file.read(header, 8);
     unsigned msg_size = checkHeader(header);
 
+    // Read message, size given in header
     std::string msg;
     msg.resize(msg_size, ' '); // reserve space
     char* begin = &*msg.begin();
     file.read(begin, msg_size);
     std::cout << "Message content: \"" << msg << "\"" << std::endl;
+
+    //Get length of waveform data
+    unsigned desc_length = boost::lexical_cast<unsigned>(msg.substr(msg.size()-9, 9));
+    std::cout << "Decriptor length: " << desc_length << std::endl;
+    std::string desc;
+    desc.resize(desc_length, ' ');
+    begin = &*desc.begin();
+    file.read(begin, desc_length);
+    std::cout << "Descriptor content: \"" << desc << "\"" << std::endl;
 
     return 0;
 }
