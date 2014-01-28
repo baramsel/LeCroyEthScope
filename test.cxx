@@ -8,8 +8,6 @@ int main(int argc, char* argv[]) {
     scope.write("*idn?");
     std::string msg = scope.read();
     std::cout << msg;
-    scope.write("c1:waveform?");
-    msg = scope.read();
-    std::cout << msg;
+    scope.readWave();
     return 0;
 }
