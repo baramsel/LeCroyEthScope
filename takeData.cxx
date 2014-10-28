@@ -7,26 +7,26 @@
 
 int main(int argc, char *argv[]) {
     if(argc != 3) {
-        std::cout << "Execute as: ./takeData [dut-name] [bias]" << std::endl;
+        std::cout << "Execute as: ./takeData <ip> <outfile_name>" << std::endl;
         return 1;
     }
-    std::string dut = argv[1];
-    int bias = boost::lexical_cast<int>(argv[2]);
+    std::string ip = argv[1];
+    std::string filename = argv[2];
+    std::string channel = "C2";
     
     std::cout << "###################" << std::endl;
-    std::cout << "DUT: " << dut << std::endl;
-    std::cout << "Bias: " << bias << std::endl;
+    std::cout << "Filename: " << filename << std::endl;
+    std::cout << "IP: " << ip << std::endl;
     std::cout << "###################" << std::endl;
 
     std::cout << "Connecting to Scope ... " << std::endl;
-    EthScope scope("192.168.1.21");
+    EthScope scope(ip);
     std::cout << " ... beep ... " << std::endl;
     scope.beep();
-    std::string channel = "C2";
     std::cout << " ... reading waveform from channel: " << channel << std::endl;
     scope.readWave(channel);
     std::cout << " ... saving waveform to file ... " << std::endl;
-    scope.saveLastWaveToFile("data.dat");
+    scope.saveLastWaveToFile(filename);
     std::cout << " ... done!" << std::endl;
 
     return 0;
