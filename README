@@ -1,0 +1,3 @@
+Small program library to interface a LeCroy Osciloscope via the Ethernet interface.
+
+Needs BOOST libraries installed and the right path set for BOOST_INC and BOOST_LIB.
