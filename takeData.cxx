@@ -3,7 +3,7 @@
 
 #include <boost/lexical_cast.hpp>
 
-#include <EthScope.h>
+#include "EthScope.h"
 
 int main(int argc, char *argv[]) {
     if(argc != 3) {
@@ -26,7 +26,7 @@ int main(int argc, char *argv[]) {
     std::cout << " ... reading waveform from channel: " << channel << std::endl;
     scope.readWave(channel);
     std::cout << " ... saving waveform to file ... " << std::endl;
-    scope.saveLastWaveToFile("data", dut, bias);
+    scope.saveLastWaveToFile("data.dat");
     std::cout << " ... done!" << std::endl;
 
     return 0;

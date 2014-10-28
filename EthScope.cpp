@@ -21,15 +21,24 @@ EthScope::EthScope(std::string ip, int port) : socket(ip, port){
     header.push_back(0x0); // Block length
     header.push_back(0x0); // Block length MSB
 
-    outfileName = "waveform_out.dat";
+    outfileName = "waveform_out.raw";
+    writeRawFile = false;
+
+    // TODO could do this automatically
+    timeScale = 1e9; // from s to ns
+    voltageScale = 1e3; // from V to mV 
 }
 
 EthScope::~EthScope() {
-
+   
 }
 
 void EthScope::setOutfile(std::string arg_name) {
     outfileName = arg_name;
+}
+
+void EthScope::setWriteRawFile(bool arg) {
+    writeRawFile = arg;
 }
 
 // Prepares the Eth Header for the GPIB msg
@@ -61,6 +70,24 @@ unsigned EthScope::checkHeader(char *arg_header) {
     return length;
 }
 
+// Swaps endianess
+template <typename T>
+T EthScope::swap_endian(T u)
+{
+    union
+    {
+        T u;
+        unsigned char u8[sizeof(T)];
+    } source, dest;
+
+    source.u = u;
+
+    for (size_t k = 0; k < sizeof(T); k++)
+        dest.u8[k] = source.u8[sizeof(T) - k - 1];
+
+    return dest.u;
+}
+
 // Writes a GPIB msg to the Scope
 void EthScope::write(std::string str) {
 #ifdef DEBUG
@@ -86,6 +113,7 @@ std::string EthScope::read() {
     return str;
 }
 
+// Writes GPIB cmds from a file
 void EthScope::configure(std::fstream file) {
     std::string tmp;
     while(file) {
@@ -95,23 +123,27 @@ void EthScope::configure(std::fstream file) {
     }
 }
 
-void EthScope::readWave() {
+void EthScope::readWave(std::string channel) {
 #ifdef DEBUG
     std::cout << __PRETTY_FUNCTION__ << " : Starting readout" << std::endl;
 #endif
-    std::fstream outfile(outfileName.c_str(), std::ios::out | std::ios::binary);
-    // Open output file to store output
+    std::fstream outfile;
+    if (writeRawFile) {
+        outfile.open(outfileName.c_str(), std::ios::out | std::ios::binary);
+        // Open output file to store output
 #ifdef DEBUG
-    std::cout << __PRETTY_FUNCTION__ << " : Opening file: " << outfileName << std::endl;
+        std::cout << __PRETTY_FUNCTION__ << " : Opening file: " << outfileName << std::endl;
 #endif
-    if (!outfile) {
-    std::cout << __PRETTY_FUNCTION__ << " : Error opening file: " << outfileName << std::endl;
-        return;
+
+        if (!outfile) {
+            std::cout << __PRETTY_FUNCTION__ << " : Error opening file: " << outfileName << std::endl;
+            return;
+        }
     }
-    
+
     // Request waveform from Scope
     // TODO Needs modification for other channels
-    std::string req = "c1:waveform?";
+    std::string req = channel + ":waveform?";
     this->write(req);
 
     // Need to read feedback now
@@ -123,41 +155,92 @@ void EthScope::readWave() {
     std::string msg_str(msg_header.begin(), msg_header.end());
     std::cout << __PRETTY_FUNCTION__ << " : Header: \"" << msg_str << "\"" <<std::endl;
 #endif
+
     // Descriptor next
     std::vector<char> header_desc = socket.read(8);
     unsigned length_desc = this->checkHeader(&header_desc[0]);
     std::vector<char> msg_desc = socket.read(length_desc);
+
     // Data next
     std::vector<char> header_data = socket.read(8);
     unsigned length_data = this->checkHeader(&header_data[0]);
-    std::vector<char> msg_data = socket.read(length_data);
+    std::vector<char> msg_data;
+    int size_left = length_data;
+    // Get the data in smaller chunks!
+    while (size_left > 0) {
+        std::vector<char> tmp_data = socket.read(1460);
+        size_left -= tmp_data.size();
+        msg_data.insert(msg_data.end(), tmp_data.begin(), tmp_data.end());
+    }
+
     // End of transmission (should only be a newline)
     std::vector<char> header_end = socket.read(8);
     unsigned length_end = this->checkHeader(&header_end[0]);
     std::vector<char> msg_end = socket.read(length_end);
 
-    // Write data to file
-    outfile.write(&header_header[0], 8);
-    outfile.write(&msg_header[0], length_header);
-    outfile.write(&header_desc[0], 8);
-    outfile.write(&msg_desc[0], length_desc);
-    outfile.write(&header_data[0], 8);
-    outfile.write(&msg_data[0], length_data);
-    outfile.write(&header_end[0], 8);
-    outfile.write(&msg_end[0], length_end);
+    // Write raw data to file
+    if (writeRawFile) {
+        outfile.write(&header_header[0], 8);
+        outfile.write(&msg_header[0], length_header);
+        outfile.write(&header_desc[0], 8);
+        outfile.write(&msg_desc[0], length_desc);
+        outfile.write(&header_data[0], 8);
+        outfile.write(&msg_data[0], length_data);
+        outfile.write(&header_end[0], 8);
+        outfile.write(&msg_end[0], length_end);
 
-    outfile.close();
+        outfile.close();
+    }
 
+    convertWaveform(msg_desc, msg_data);
 }
+
+void EthScope::convertWaveform(std::vector<char> desc, std::vector<char> data) {
+    // Get waveform descriptors
+    float vertical_offset = swap_endian<float>(*(float*)&desc[160]);
+    float vertical_gain = swap_endian<float>(*(float*)&desc[156]);
+    float horizontal_interval = swap_endian<float>(*(float*)&desc[176]);
+    double horizontal_offset = swap_endian<double>(*(double*)&desc[180]);
+    std::string vertical_unit(&desc[196], 2);
+    std::string horizontal_unit(&desc[244], 2);
+    
+    // Convert data
+    double time = horizontal_offset*timeScale;
+    std::vector<double> wave_x, wave_y;
+    for (unsigned int i=0; i<data.size(); i+=2) {
+        // Combine the values to the adc reading
+        int16_t adc_value = 0;
+        adc_value += (0xFF & data[i]) << 8;
+        adc_value += (0xFF & data[i+1]);
+        // Convert to real voltage
+        double real_value = ((adc_value*vertical_gain)-vertical_offset)*voltageScale;
+        wave_y.push_back(real_value);
+        wave_x.push_back(time);
+        time += horizontal_interval*timeScale;
+    }
+    
+    // Save last waveform
+    waveData.setTime(std::time(0));
+    waveData.setXscale(timeScale);
+    waveData.setYscale(voltageScale);
+    waveData.setXunit(horizontal_unit);
+    waveData.setYunit(vertical_unit);
+    waveData.setData(wave_x, wave_y);
+}
+
+void EthScope::saveLastWaveToFile(std::string filename) {
+    waveData.toFile(filename);
+}
+
 
 void EthScope::beep() {
     std::string str = "buzz beep";
     this->write(str);
 }
 
-void EthScope::idn() {
+std::string EthScope::idn() {
     std::string str = "*idn?";
     this->write(str);
-    std::cout << "Ident: " << this->read() << std::endl;
+    return this->read();
 }
 

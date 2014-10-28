@@ -1,6 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <boost/lexical_cast.hpp>
 
@@ -19,6 +20,51 @@ unsigned checkHeader(char *header) {
     std::cout << "- Block Length:    " << length << std::endl;
     return length;
 }
+
+float getFloat(char *data, unsigned pos) {
+    uint32_t bla = 0;
+    bla += (0xFF & data[pos+3]) << 0;
+    bla += (0xFF & data[pos+2]) << 8;
+    bla += (0xFF & data[pos+1]) << 16;
+    bla += (0xFF & data[pos]) << 24;
+    return *((float*)&bla);
+}
+
+double swapEndian(char *data, unsigned pos) {
+    union {
+        double d;
+        uint8_t c[8];
+    } bla;
+    
+    bla.c[7] = (0xFF & data[pos+7]);
+    bla.c[6] = (0xFF & data[pos+6]);
+    bla.c[5] = (0xFF & data[pos+5]);
+    bla.c[4] = (0xFF & data[pos+4]);
+    bla.c[3] = (0xFF & data[pos+3]);
+    bla.c[2] = (0xFF & data[pos+2]);
+    bla.c[1] = (0xFF & data[pos+1]);
+    bla.c[0] = (0xFF & data[pos]);
+     
+    return bla.d;
+}
+
+template <typename T>
+T swap_endian(T u)
+{
+    union
+    {
+        T u;
+        unsigned char u8[sizeof(T)];
+    } source, dest;
+
+    source.u = u;
+
+    for (size_t k = 0; k < sizeof(T); k++)
+        dest.u8[k] = source.u8[sizeof(T) - k - 1];
+
+    return dest.u;
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         std::cout << "Specify file" << std::endl;
@@ -97,9 +143,22 @@ int main(int argc, char *argv[]) {
     wave_array_count += (0xFF & desc[117]) << 16;
     wave_array_count += (0xFF & desc[116]) << 24;
 
+    float vertical_offset = swap_endian<float>(*(float*)&desc[160]);
+    float vertical_gain = swap_endian<float>(*(float*)&desc[156]);
+    float horizontal_interval = swap_endian<float>(*(float*)&desc[176]);
+    double horizontal_offset = swap_endian<double>(*(double*)&desc[180]);
+    std::string vertical_unit(&desc[196], 2);
+    std::string horizontal_unit(&desc[244], 2);
+
     std::cout << "Wave descriptor length: " << wave_desc << std::endl;
     std::cout << "Wave array length: " << wave_array1 << std::endl;
     std::cout << "Wave number of datapoints: " << wave_array_count << std::endl;
+    std::cout << "Vertical offset: " << vertical_offset << " " << std::endl;
+    std::cout << "Vertical gain: " << vertical_gain << " " << std::endl;
+    std::cout << "Horizontal offset: " << horizontal_offset << " " << std::endl;
+    std::cout << "Horizontal interval: " << horizontal_interval << " " << std::endl;
+    std::cout << "Vertical unit: " << vertical_unit << std::endl;
+    std::cout << "Horizontal unit: " << horizontal_unit << std::endl;
     
     std::cout << std::endl << "################################" << std::endl;
     std::cout << "Messag Part #3:" << std::endl;
@@ -116,12 +175,28 @@ int main(int argc, char *argv[]) {
     wave.resize(wave_length, 0x0);
     begin = &*wave.begin();
     file.read(begin, wave_length);
+    std::vector<double> real_wave;
+    std::vector<double> real_time;
+    std::fstream plot("plot.dat", std::ios::out);
+    double time = horizontal_offset*1e6;
     for (unsigned i=0; i<wave_length; i++) {
         if (i % 16  == 0) {
-            std::cout << std::endl << i << "\t";
+//            std::cout << std::endl << i << "\t";
         }
-        std::cout << HEX(0xFF & wave[i]) << " ";
+//        std::cout << HEX(0xFF & wave[i]) << " ";
+        if (i%2 == 0) {
+            int16_t adc_value = 0;
+            adc_value += (0xFF & wave[i]) << 8;
+            adc_value += (0xFF & wave[i+1]);
+            double real_value = (adc_value*vertical_gain)-vertical_offset;
+            real_wave.push_back(real_value);
+            real_time.push_back(time);
+            plot << real_value << " " << time << std::endl;
+            time += horizontal_interval*1e6;
+        }
     }
+    plot.close();
+
     std::cout << std::endl;
     if (file.eof()) std::cout << "End  file reached" << std::endl;
     
